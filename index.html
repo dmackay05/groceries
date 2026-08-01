@@ -124,8 +124,12 @@
 
   .row2{
     display:none; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;
+    align-items:start;
   }
-  .row2 input, .row2 select{font-family:'DM Mono',monospace; font-size:13px;}
+  .row2 input, .row2 select{
+    font-family:'DM Mono',monospace; font-size:13px;
+    height:42px; line-height:normal; padding-top:0; padding-bottom:0;
+  }
   .row2 .full{grid-column:1 / -1;}
   select{
     appearance:none; -webkit-appearance:none;
@@ -179,6 +183,7 @@
   }
   .modal-sub{font-size:12.5px; color:var(--ink-dim); margin-bottom:14px; line-height:1.4;}
   .modal input{margin-bottom:6px;}
+  .modal select{margin-bottom:6px; height:44px; line-height:normal; padding-top:0; padding-bottom:0;}
   .modal-status{
     font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-faint); min-height:16px; margin-bottom:10px;
   }
