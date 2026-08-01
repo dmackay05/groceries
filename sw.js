@@ -1,4 +1,4 @@
-const CACHE = 'grocery-shell-v2';
+const CACHE = 'grocery-shell-v3';
 
 self.addEventListener('install', e => {
   // take over immediately rather than waiting for all tabs to close
