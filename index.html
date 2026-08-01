@@ -53,7 +53,7 @@
   .tape .amount{font-family:'DM Mono',monospace; font-size:22px; color:var(--accent);}
   .tape .count{font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-faint);}
 
-  .navrow{text-align:center; margin-top:10px;}
+  .navrow{display:flex; justify-content:space-between; align-items:center; margin-top:10px;}
   .navlink{
     font-family:'DM Mono',monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
     color:var(--ink-dim); cursor:pointer; border-bottom:1px solid var(--line); padding-bottom:2px;
@@ -127,6 +127,15 @@
   }
   .row2 input, .row2 select{font-family:'DM Mono',monospace; font-size:13px;}
   .row2 .full{grid-column:1 / -1;}
+  select{
+    appearance:none; -webkit-appearance:none;
+    background-image:linear-gradient(45deg,transparent 50%,var(--ink-faint) 50%),linear-gradient(135deg,var(--ink-faint) 50%,transparent 50%);
+    background-position:calc(100% - 15px) calc(50% + 1px), calc(100% - 10px) calc(50% + 1px);
+    background-size:5px 5px, 5px 5px; background-repeat:no-repeat;
+    padding-right:30px;
+  }
+  select.empty{color:var(--ink-faint);}
+  select option{color:var(--ink); background:var(--bg);}
 
   .addbtn{
     background:var(--accent); border:none; color:#1c1305; font-weight:700;
@@ -231,6 +240,7 @@
     <div class="count" id="count">0 items</div>
   </div>
   <div class="navrow">
+    <span class="navlink" id="groupLink">Group: Category</span>
     <span class="navlink" id="stockLink">Stock ›</span>
   </div>
   <div class="syncrow">
@@ -262,7 +272,7 @@
     <input type="text" id="eAmount" placeholder="Amount (e.g. 2 lb)">
     <input type="text" id="eStore" placeholder="Store" list="storeList">
     <input type="number" step="0.01" id="ePrice" placeholder="Price ($)" inputmode="decimal">
-    <input type="text" id="eCategory" placeholder="Category (optional)">
+    <select id="eCategory"></select>
     <div class="modal-status" id="editStatus"></div>
     <div class="modal-actions">
       <button class="mbtn ghost" id="editDeleteBtn">Delete</button>
@@ -292,7 +302,7 @@
     <input type="text" id="fAmount" placeholder="Amount (e.g. 2 lb)">
     <input type="text" id="fStore" placeholder="Store" list="storeList">
     <input type="number" step="0.01" id="fPrice" placeholder="Price ($)" inputmode="decimal">
-    <input type="text" id="fCategory" placeholder="Category (optional)">
+    <select id="fCategory"></select>
   </div>
   <datalist id="storeList"></datalist>
   <div class="toggle" id="toggle">+ details</div>
@@ -306,6 +316,49 @@
 <script>
 const KEY = 'grocery_items_v1';
 let items = JSON.parse(localStorage.getItem(KEY) || '[]');
+
+// Built-in categories, ordered roughly the way you walk a store so the
+// grouped list doubles as a route through the aisles.
+const CATEGORIES = [
+  'Produce',
+  'Meat & Seafood',
+  'Dairy & Eggs',
+  'Bakery',
+  'Deli',
+  'Frozen',
+  'Pantry & Dry Goods',
+  'Baking',
+  'Canned & Jarred',
+  'Spices & Seasoning',
+  'Snacks',
+  'Beverages',
+  'Breakfast & Cereal',
+  'Condiments & Sauces',
+  'Paper & Cleaning',
+  'Personal Care',
+  'Baby',
+  'Pet',
+  'Other'
+];
+
+function fillCategorySelect(sel, placeholder){
+  sel.innerHTML = `<option value="">${placeholder}</option>` +
+    CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('');
+}
+fillCategorySelect(document.getElementById('fCategory'), 'Category…');
+fillCategorySelect(document.getElementById('eCategory'), 'Category…');
+
+// gray out the select when nothing is chosen, so it reads like a placeholder
+function syncSelectStyle(sel){ sel.classList.toggle('empty', !sel.value); }
+['fCategory','eCategory'].forEach(id => {
+  const sel = document.getElementById(id);
+  syncSelectStyle(sel);
+  sel.addEventListener('change', () => syncSelectStyle(sel));
+});
+
+// grouping preference persists between sessions
+const GROUP_KEY = 'grocery_group_by';
+let groupBy = localStorage.getItem(GROUP_KEY) || 'category';
 
 const listEl = document.getElementById('list');
 const totalEl = document.getElementById('total');
@@ -323,6 +376,18 @@ toggle.addEventListener('click', () => {
 
 function save(){ localStorage.setItem(KEY, JSON.stringify(items)); render(); }
 
+const groupLink = document.getElementById('groupLink');
+function updateGroupLabel(){
+  groupLink.textContent = 'Group: ' + (groupBy === 'category' ? 'Category' : 'Store');
+}
+updateGroupLabel();
+groupLink.addEventListener('click', () => {
+  groupBy = groupBy === 'category' ? 'store' : 'category';
+  localStorage.setItem(GROUP_KEY, groupBy);
+  updateGroupLabel();
+  render();
+});
+
 function render(){
   // running total: unbought items only
   const unbought = items.filter(i => !i.bought);
@@ -339,30 +404,41 @@ function render(){
     return;
   }
 
-  // group by store, "No store" last, bought items sink within group order but stay grouped
+  // group by the chosen field; empty values fall into "Unassigned", shown last
   const groups = {};
   items.forEach(i => {
-    const key = i.store && i.store.trim() ? i.store.trim() : 'Unassigned';
+    const raw = groupBy === 'category' ? i.category : i.store;
+    const key = raw && String(raw).trim() ? String(raw).trim() : 'Unassigned';
     (groups[key] = groups[key] || []).push(i);
   });
-  const storeNames = Object.keys(groups).sort((a,b) => {
-    if(a==='Unassigned') return 1;
-    if(b==='Unassigned') return -1;
+
+  const groupNames = Object.keys(groups).sort((a,b) => {
+    if(a === 'Unassigned') return 1;
+    if(b === 'Unassigned') return -1;
+    if(groupBy === 'category'){
+      // keep the built-in aisle order rather than alphabetizing
+      const ia = CATEGORIES.indexOf(a), ib = CATEGORIES.indexOf(b);
+      if(ia !== -1 && ib !== -1) return ia - ib;
+      if(ia !== -1) return -1;
+      if(ib !== -1) return 1;
+    }
     return a.localeCompare(b);
   });
 
-  listEl.innerHTML = storeNames.map(store => {
-    const rows = groups[store]
+  listEl.innerHTML = groupNames.map(name => {
+    const rows = groups[name]
       .sort((a,b) => (a.bought - b.bought))
       .map(i => itemHTML(i)).join('');
-    return `<div class="store-group"><div class="store-name">${esc(store)}</div>${rows}</div>`;
+    return `<div class="store-group"><div class="store-name">${esc(name)}</div>${rows}</div>`;
   }).join('');
 }
 
 function itemHTML(i){
   const metaParts = [];
   if(i.amount) metaParts.push(`<span>${esc(i.amount)}</span>`);
-  if(i.category) metaParts.push(`<span>${esc(i.category)}</span>`);
+  // show whichever field isn't already the group header
+  if(groupBy === 'category' && i.store) metaParts.push(`<span>${esc(i.store)}</span>`);
+  if(groupBy === 'store' && i.category) metaParts.push(`<span>${esc(i.category)}</span>`);
   if(i.price) metaParts.push(`<span class="price">$${parseFloat(i.price).toFixed(2)}</span>`);
   return `
     <div class="item ${i.bought?'bought':''}" data-id="${i.id}">
@@ -429,6 +505,7 @@ function addItem(){
   document.getElementById('fAmount').value = '';
   document.getElementById('fPrice').value = '';
   document.getElementById('fCategory').value = '';
+  syncSelectStyle(document.getElementById('fCategory'));
   // keep store filled in for fast repeat-adds at same store
   document.getElementById('fName').focus();
   save();
@@ -595,11 +672,19 @@ function openEdit(id){
   const it = items.find(i => i.id === id);
   if(!it) return;
   editingId = id;
+  // if this item has a category from before the built-in list existed,
+  // add it as an option so opening the editor doesn't silently clear it
+  if(it.category && !CATEGORIES.includes(it.category)){
+    const opt = document.createElement('option');
+    opt.value = it.category; opt.textContent = it.category;
+    eCategory.appendChild(opt);
+  }
   eName.value = it.name || '';
   eAmount.value = it.amount || '';
   eStore.value = it.store || '';
   ePrice.value = it.price || '';
   eCategory.value = it.category || '';
+  syncSelectStyle(eCategory);
   editStatus.textContent = '';
   editBackdrop.classList.add('open');
 }
