@@ -53,6 +53,13 @@
   .tape .amount{font-family:'DM Mono',monospace; font-size:22px; color:var(--accent);}
   .tape .count{font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-faint);}
 
+  .navrow{text-align:center; margin-top:10px;}
+  .navlink{
+    font-family:'DM Mono',monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-dim); cursor:pointer; border-bottom:1px solid var(--line); padding-bottom:2px;
+  }
+  .navlink:active{color:var(--accent); border-color:var(--accent);}
+
   main{padding:14px 20px 140px;}
 
   .store-group{margin-top:22px;}
@@ -78,7 +85,7 @@
   }
   .item.bought .check{background:var(--good); border-color:var(--good); color:var(--bg);}
 
-  .info{flex:1; min-width:0;}
+  .info{flex:1; min-width:0; cursor:pointer;}
   .name{font-size:15.5px; font-weight:500; color:var(--ink);}
   .meta{
     margin-top:3px; font-family:'DM Mono',monospace; font-size:11.5px; color:var(--ink-dim);
@@ -176,6 +183,38 @@
   .mbtn.primary{background:var(--accent); border-color:var(--accent); color:#1c1305; font-weight:700;}
   .mbtn.ghost:active{border-color:var(--danger); color:var(--danger);}
 
+  /* stock screen */
+  .stock-screen{
+    display:none; position:fixed; inset:0; background:var(--bg); z-index:15;
+    flex-direction:column;
+  }
+  .stock-screen.open{display:flex;}
+  .stock-header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:calc(20px + env(safe-area-inset-top)) 20px 14px; border-bottom:1px solid var(--line);
+  }
+  .stock-title{
+    font-family:'Cormorant Garamond',serif; font-style:italic; font-weight:600; font-size:24px; color:var(--ink);
+  }
+  .stock-sort{
+    font-family:'DM Mono',monospace; font-size:10.5px; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--ink-faint); cursor:pointer;
+  }
+  .stock-list{flex:1; overflow-y:auto; padding:14px 20px 40px;}
+  .stock-item{
+    background:var(--paper); border:1px solid var(--line); border-radius:10px;
+    padding:12px 14px; margin-bottom:8px;
+  }
+  .stock-row1{display:flex; justify-content:space-between; align-items:baseline; gap:10px;}
+  .stock-name{font-size:15px; font-weight:500; color:var(--ink);}
+  .stock-tally{font-family:'DM Mono',monospace; font-size:13px; color:var(--accent); flex-shrink:0;}
+  .stock-row2{
+    margin-top:4px; font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-faint);
+    display:flex; flex-wrap:wrap; gap:4px 10px;
+  }
+  .stock-empty{text-align:center; padding:60px 20px; color:var(--ink-faint);}
+  .stock-empty .big{font-family:'Cormorant Garamond',serif; font-style:italic; font-size:20px; color:var(--ink-dim); margin-bottom:6px;}
+
   ::-webkit-scrollbar{display:none;}
 </style>
 </head>
@@ -190,6 +229,9 @@
       <div class="amount" id="total">$0.00</div>
     </div>
     <div class="count" id="count">0 items</div>
+  </div>
+  <div class="navrow">
+    <span class="navlink" id="stockLink">Stock ›</span>
   </div>
   <div class="syncrow">
     <div class="dot" id="syncdot"></div>
@@ -210,6 +252,33 @@
       <button class="mbtn primary" id="saveBtn">Save &amp; sync</button>
     </div>
   </div>
+</div>
+
+<div class="modal-backdrop" id="editBackdrop">
+  <div class="modal">
+    <div class="modal-title">Edit item</div>
+    <div class="modal-sub">Update the details for this item.</div>
+    <input type="text" id="eName" placeholder="Item name" autocomplete="off">
+    <input type="text" id="eAmount" placeholder="Amount (e.g. 2 lb)">
+    <input type="text" id="eStore" placeholder="Store" list="storeList">
+    <input type="number" step="0.01" id="ePrice" placeholder="Price ($)" inputmode="decimal">
+    <input type="text" id="eCategory" placeholder="Category (optional)">
+    <div class="modal-status" id="editStatus"></div>
+    <div class="modal-actions">
+      <button class="mbtn ghost" id="editDeleteBtn">Delete</button>
+      <button class="mbtn ghost" id="editCancelBtn">Cancel</button>
+      <button class="mbtn primary" id="editSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="stock-screen" id="stockScreen">
+  <div class="stock-header">
+    <span class="navlink" id="stockBack">‹ Back</span>
+    <div class="stock-title">Stock</div>
+    <span class="stock-sort" id="stockSort">Most bought</span>
+  </div>
+  <div class="stock-list" id="stockList"></div>
 </div>
 
 <main id="list"></main>
@@ -298,7 +367,7 @@ function itemHTML(i){
   return `
     <div class="item ${i.bought?'bought':''}" data-id="${i.id}">
       <div class="check" onclick="toggleBought('${i.id}')">${i.bought?'✓':''}</div>
-      <div class="info">
+      <div class="info" onclick="openEdit('${i.id}')">
         <div class="name">${esc(i.name)}</div>
         ${metaParts.length ? `<div class="meta">${metaParts.join('')}</div>` : ''}
       </div>
@@ -308,9 +377,32 @@ function itemHTML(i){
 
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+const HISTORY_KEY = 'grocery_history_v1';
+let history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+function saveHistory(){ localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }
+
 function toggleBought(id){
   const it = items.find(i=>i.id===id);
-  if(it){ it.bought = !it.bought; save(); }
+  if(!it) return;
+  it.bought = !it.bought;
+  if(it.bought){
+    // log a purchase to history, and remember which entry so an accidental
+    // uncheck can undo it cleanly rather than double counting
+    const entry = {
+      id: 'h_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+      name: it.name, amount: it.amount, store: it.store,
+      price: it.price, category: it.category,
+      date: new Date().toISOString()
+    };
+    history.push(entry);
+    it.lastHistoryId = entry.id;
+    saveHistory();
+  } else if(it.lastHistoryId){
+    history = history.filter(h => h.id !== it.lastHistoryId);
+    it.lastHistoryId = null;
+    saveHistory();
+  }
+  save();
 }
 function removeItem(id){
   items = items.filter(i=>i.id!==id);
@@ -488,6 +580,119 @@ function pullFromSheet(cb){
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
+
+/* ---------- Edit item ---------- */
+const editBackdrop = document.getElementById('editBackdrop');
+const eName = document.getElementById('eName');
+const eAmount = document.getElementById('eAmount');
+const eStore = document.getElementById('eStore');
+const ePrice = document.getElementById('ePrice');
+const eCategory = document.getElementById('eCategory');
+const editStatus = document.getElementById('editStatus');
+let editingId = null;
+
+function openEdit(id){
+  const it = items.find(i => i.id === id);
+  if(!it) return;
+  editingId = id;
+  eName.value = it.name || '';
+  eAmount.value = it.amount || '';
+  eStore.value = it.store || '';
+  ePrice.value = it.price || '';
+  eCategory.value = it.category || '';
+  editStatus.textContent = '';
+  editBackdrop.classList.add('open');
+}
+function closeEdit(){ editBackdrop.classList.remove('open'); editingId = null; }
+
+document.getElementById('editCancelBtn').addEventListener('click', closeEdit);
+editBackdrop.addEventListener('click', e => { if(e.target === editBackdrop) closeEdit(); });
+
+document.getElementById('editSaveBtn').addEventListener('click', () => {
+  const it = items.find(i => i.id === editingId);
+  if(!it) return;
+  const name = eName.value.trim();
+  if(!name){ editStatus.className = 'modal-status err'; editStatus.textContent = 'Name can\'t be empty.'; return; }
+  it.name = name;
+  it.amount = eAmount.value.trim();
+  it.store = eStore.value.trim();
+  it.price = ePrice.value.trim();
+  it.category = eCategory.value.trim();
+  save();
+  closeEdit();
+});
+
+document.getElementById('editDeleteBtn').addEventListener('click', () => {
+  if(!editingId) return;
+  removeItem(editingId);
+  closeEdit();
+});
+
+/* ---------- Stock: tally of everything ever purchased ---------- */
+const stockScreen = document.getElementById('stockScreen');
+const stockList = document.getElementById('stockList');
+const stockSort = document.getElementById('stockSort');
+let stockSortMode = 'count'; // 'count' or 'recent'
+
+document.getElementById('stockLink').addEventListener('click', () => {
+  renderStock();
+  stockScreen.classList.add('open');
+});
+document.getElementById('stockBack').addEventListener('click', () => {
+  stockScreen.classList.remove('open');
+});
+stockSort.addEventListener('click', () => {
+  stockSortMode = stockSortMode === 'count' ? 'recent' : 'count';
+  stockSort.textContent = stockSortMode === 'count' ? 'Most bought' : 'Most recent';
+  renderStock();
+});
+
+function renderStock(){
+  if(history.length === 0){
+    stockList.innerHTML = `<div class="stock-empty"><div class="big">No purchases yet</div>Check items off the list and they'll show up here.</div>`;
+    return;
+  }
+
+  const groups = {};
+  history.forEach(h => {
+    const key = (h.name || '').trim().toLowerCase();
+    if(!key) return;
+    if(!groups[key]) groups[key] = { name: h.name.trim(), entries: [] };
+    groups[key].entries.push(h);
+  });
+
+  let list = Object.values(groups).map(g => {
+    const entries = g.entries.slice().sort((a,b) => new Date(b.date) - new Date(a.date));
+    const count = entries.length;
+    const last = entries[0];
+    const prices = entries.map(e => parseFloat(e.price)).filter(p => !isNaN(p));
+    const avgPrice = prices.length ? (prices.reduce((s,p)=>s+p,0) / prices.length) : null;
+    const storeCounts = {};
+    entries.forEach(e => { if(e.store) storeCounts[e.store] = (storeCounts[e.store]||0) + 1; });
+    const topStore = Object.keys(storeCounts).sort((a,b) => storeCounts[b]-storeCounts[a])[0];
+    return { name: g.name, count, lastDate: last.date, avgPrice, topStore };
+  });
+
+  list.sort((a,b) => stockSortMode === 'count'
+    ? (b.count - a.count) || a.name.localeCompare(b.name)
+    : new Date(b.lastDate) - new Date(a.lastDate));
+
+  stockList.innerHTML = list.map(s => {
+    const dateStr = new Date(s.lastDate).toLocaleDateString([], {month:'short', day:'numeric'});
+    const bits = [`<span>last ${dateStr}</span>`];
+    if(s.topStore) bits.push(`<span>${esc(s.topStore)}</span>`);
+    if(s.avgPrice !== null) bits.push(`<span>avg $${s.avgPrice.toFixed(2)}</span>`);
+    return `
+      <div class="stock-item">
+        <div class="stock-row1">
+          <div class="stock-name">${esc(s.name)}</div>
+          <div class="stock-tally">×${s.count}</div>
+        </div>
+        <div class="stock-row2">${bits.join('')}</div>
+      </div>`;
+  }).join('');
+}
+
 </script>
 </body>
 </html>
